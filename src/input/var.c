@@ -97,7 +97,6 @@ static const vlc_input_callback_t p_input_callbacks[] =
     CALLBACK( "title", TitleCallback ),
     CALLBACK( "chapter", SeekpointCallback ),
     CALLBACK( "audio-delay", EsDelayCallback ),
-    CALLBACK( "spu-delay", EsDelayCallback ),
     CALLBACK( "video-es", ESCallback ),
     CALLBACK( "audio-es", ESCallback ),
     CALLBACK( "spu-es", ESCallback ),
@@ -786,10 +785,6 @@ static int EsDelayCallback ( vlc_object_t *p_this, char const *psz_cmd,
     if( !strcmp( psz_cmd, "audio-delay" ) )
     {
         input_ControlPush( p_input, INPUT_CONTROL_SET_AUDIO_DELAY, &newval );
-    }
-    else if( !strcmp( psz_cmd, "spu-delay" ) )
-    {
-        input_ControlPush( p_input, INPUT_CONTROL_SET_SPU_DELAY, &newval );
     }
     return VLC_SUCCESS;
 }

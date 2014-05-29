@@ -35,6 +35,7 @@
 #include <vlc_plugin.h>
 #include <vlc_input.h>
 #include <vlc_memory.h>
+#include <vlc_interface.h>
 
 #include <ctype.h>
 
@@ -127,6 +128,16 @@ static void TextUnload( text_t * );
 
 typedef struct
 {
+    /* 
+     * i_start and i_stop are the original subtitle timestamps.
+     * 
+     * In order to take into account the subtitle delay (spu-delay), 
+     * please use 
+     *   adjust_subtitle_time(p_demux, my_subtitle_t.i_start)
+     * instead of 
+     *   my_subtitle_t.i_start 
+     * (same goes for i_stop)
+     */
     int64_t i_start;
     int64_t i_stop;
 
@@ -141,6 +152,7 @@ struct demux_sys_t
     es_out_id_t *es;
 
     int64_t     i_next_demux_date;
+    int64_t     i_last_demux_date;
     int64_t     i_microsecperframe;
 
     char        *psz_header;
@@ -166,6 +178,14 @@ struct demux_sys_t
         float f_total;
         float f_factor;
     } mpsub;
+    
+    /*subtitle_delaybookmarks: placeholder for storing subtitle sync timestamps*/
+    struct
+    {
+        int64_t i_time_subtitle;
+        int64_t i_time_audio;
+    } subtitle_delaybookmarks;
+
 };
 
 static int  ParseMicroDvd   ( demux_t *, subtitle_t *, int );
@@ -224,6 +244,76 @@ static int Control( demux_t *, int, va_list );
 
 static void Fix( demux_t * );
 static char * get_language_from_filename( const char * );
+static int64_t adjust_subtitle_time( demux_t *, int64_t);
+static int set_current_subtitle_by_time(demux_t *p_demux, int64_t i64_when);
+
+
+/*****************************************************************************
+ * external callbacks
+ *****************************************************************************/
+int subtitle_external_callback ( vlc_object_t * ,char const *, vlc_value_t old_value, vlc_value_t new_value, void * callback_data);
+int subtitle_external_callback ( 
+        vlc_object_t * object,
+        char const * variable_name,
+        vlc_value_t old_value,
+        vlc_value_t new_value,
+        void * callback_data_p_demux)
+{
+    demux_t *p_demux = (demux_t*)callback_data_p_demux;
+    (void)object;
+    (void)old_value;
+    (void)new_value;
+    
+    demux_sys_t *p_sys = p_demux->p_sys;
+    
+    if ( ! strcmp(variable_name, "spu-bookmarkaudio") )
+    {
+        p_sys->subtitle_delaybookmarks.i_time_audio = p_sys->i_last_demux_date;
+        var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: bookmarked audio time"));
+    }
+    if ( ! strcmp(variable_name, "spu-bookmarksubtitle") )
+    {
+        p_sys->subtitle_delaybookmarks.i_time_subtitle = p_sys->i_last_demux_date;
+        var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: bookmarked subtitle time"));
+    }
+    if ( ! strcmp(variable_name, "spu-syncbookmarks") )
+    {
+        if ( (p_sys->subtitle_delaybookmarks.i_time_audio == 0) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == 0) )
+        {
+            var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: set bookmarks first!"));
+        }
+        else
+        {
+            int64_t i_current_subdelay = var_GetTime( p_demux->p_parent, "spu-delay" );
+            int64_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
+            int64_t i_total_subdelay = i_current_subdelay + i_additional_subdelay;
+            var_SetTime( p_demux->p_parent, "spu-delay", i_total_subdelay);
+            char message[150];
+            snprintf(message, 150, 
+                    _( "Sub sync: corrected %i ms (total delay = %i ms)" ),
+                                    (int)(i_additional_subdelay / 1000),
+                                    (int)(i_total_subdelay / 1000) );
+            var_SetString(p_demux->p_libvlc, "key-osdmessage", message);
+            p_sys->subtitle_delaybookmarks.i_time_audio = 0;
+            p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+        }
+    }
+    if ( ! strcmp(variable_name, "spu-syncreset") )
+    {
+        var_SetTime( p_demux->p_parent, "spu-delay", 0);
+        p_sys->subtitle_delaybookmarks.i_time_audio = 0;
+        p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+        var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: delay reset"));
+        return VLC_SUCCESS;
+    }    
+    if ( ! strcmp(variable_name, "spu-delau") )
+    {
+        set_current_subtitle_by_time(p_demux, p_sys->i_last_demux_date);
+    }
+    return VLC_SUCCESS;
+}
+
+
 
 /*****************************************************************************
  * Module initializer
@@ -249,7 +339,26 @@ static int Open ( vlc_object_t *p_this )
     p_demux->p_sys = p_sys = malloc( sizeof( demux_sys_t ) );
     if( p_sys == NULL )
         return VLC_ENOMEM;
+    
+    /* reset spu-delay at Open*/
+    var_SetTime( p_demux->p_parent, "spu-delay", 0 );
+    
+    p_sys->subtitle_delaybookmarks.i_time_audio = 0;
+    p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
 
+    
+    /* Add callbacks*/
+    var_Create(p_demux->p_parent, "spu-bookmarkaudio", VLC_VAR_INTEGER);
+    var_Create(p_demux->p_parent, "spu-bookmarksubtitle", VLC_VAR_INTEGER);
+    var_Create(p_demux->p_parent, "spu-syncbookmarks", VLC_VAR_INTEGER);
+    var_Create(p_demux->p_parent, "spu-syncreset", VLC_VAR_INTEGER);
+    var_AddCallback( p_demux->p_parent, "spu-bookmarkaudio", &subtitle_external_callback, p_this );
+    var_AddCallback( p_demux->p_parent, "spu-bookmarksubtitle", &subtitle_external_callback, p_this );
+    var_AddCallback( p_demux->p_parent, "spu-syncbookmarks", &subtitle_external_callback, p_this );
+    var_AddCallback( p_demux->p_parent, "spu-syncreset", &subtitle_external_callback, p_this );
+    var_AddCallback( p_demux->p_parent, "spu-delay", &subtitle_external_callback, p_this );
+
+    
     p_sys->psz_header         = NULL;
     p_sys->i_subtitle         = 0;
     p_sys->i_subtitles        = 0;
@@ -579,8 +688,21 @@ static void Close( vlc_object_t *p_this )
 {
     demux_t *p_demux = (demux_t*)p_this;
     demux_sys_t *p_sys = p_demux->p_sys;
-    int i;
 
+    /* Remove callbacks*/
+    var_DelCallback( p_demux->p_parent, "spu-bookmarkaudio", &subtitle_external_callback, p_this );
+    var_DelCallback( p_demux->p_parent, "spu-bookmarksubtitle", &subtitle_external_callback, p_this );
+    var_DelCallback( p_demux->p_parent, "spu-syncbookmarks", &subtitle_external_callback, p_this );
+    var_DelCallback( p_demux->p_parent, "spu-syncreset", &subtitle_external_callback, p_this );
+
+    var_DelCallback( p_demux->p_parent, "spu-delay", &subtitle_external_callback, p_this );
+    var_Destroy(p_demux->p_parent, "spu-bookmarkaudio");
+    var_Destroy(p_demux->p_parent, "spu-bookmarksubtitle");
+    var_Destroy(p_demux->p_parent, "spu-syncbookmarks");
+    var_Destroy(p_demux->p_parent, "spu-syncreset");
+
+
+    int i;
     for( i = 0; i < p_sys->i_subtitles; i++ )
         free( p_sys->subtitle[i].psz_text );
     free( p_sys->subtitle );
@@ -591,6 +713,31 @@ static void Close( vlc_object_t *p_this )
 /*****************************************************************************
  * Control:
  *****************************************************************************/
+
+/* Utlity function : sets the current subtitle index (p_sys->i_subtitle)
+ * based on the time 
+ */
+static int set_current_subtitle_by_time(demux_t *p_demux, int64_t i64_when)
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+
+    p_sys->i_subtitle = 0;
+    while( p_sys->i_subtitle < p_sys->i_subtitles )
+    {
+        const subtitle_t *p_subtitle = &p_sys->subtitle[p_sys->i_subtitle];
+        if( adjust_subtitle_time(p_demux, p_subtitle->i_start) > i64_when )
+            break;
+        if( p_subtitle->i_stop > p_subtitle->i_start && adjust_subtitle_time(p_demux, p_subtitle->i_stop) > i64_when )
+            break;
+
+        p_sys->i_subtitle++;
+    }
+
+    if( p_sys->i_subtitle >= p_sys->i_subtitles )
+        return VLC_EGENERIC;
+    return VLC_SUCCESS;
+}
+
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
@@ -608,29 +755,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             pi64 = (int64_t*)va_arg( args, int64_t * );
             if( p_sys->i_subtitle < p_sys->i_subtitles )
             {
-                *pi64 = p_sys->subtitle[p_sys->i_subtitle].i_start;
+                *pi64 = adjust_subtitle_time(p_demux, p_sys->subtitle[p_sys->i_subtitle].i_start);
                 return VLC_SUCCESS;
             }
             return VLC_EGENERIC;
 
         case DEMUX_SET_TIME:
             i64 = (int64_t)va_arg( args, int64_t );
-            p_sys->i_subtitle = 0;
-            while( p_sys->i_subtitle < p_sys->i_subtitles )
-            {
-                const subtitle_t *p_subtitle = &p_sys->subtitle[p_sys->i_subtitle];
-
-                if( p_subtitle->i_start > i64 )
-                    break;
-                if( p_subtitle->i_stop > p_subtitle->i_start && p_subtitle->i_stop > i64 )
-                    break;
-
-                p_sys->i_subtitle++;
-            }
-
-            if( p_sys->i_subtitle >= p_sys->i_subtitles )
-                return VLC_EGENERIC;
-            return VLC_SUCCESS;
+            return set_current_subtitle_by_time(p_demux, i64);
 
         case DEMUX_GET_POSITION:
             pf = (double*)va_arg( args, double * );
@@ -640,7 +772,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             }
             else if( p_sys->i_subtitles > 0 )
             {
-                *pf = (double)p_sys->subtitle[p_sys->i_subtitle].i_start /
+                int64_t i_start_adjust = adjust_subtitle_time(p_demux, p_sys->subtitle[p_sys->i_subtitle].i_start);
+                *pf = (double) ( i_start_adjust ) /
                       (double)p_sys->i_length;
             }
             else
@@ -655,7 +788,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
             p_sys->i_subtitle = 0;
             while( p_sys->i_subtitle < p_sys->i_subtitles &&
-                   p_sys->subtitle[p_sys->i_subtitle].i_start < i64 )
+                   adjust_subtitle_time(p_demux, p_sys->subtitle[p_sys->i_subtitle].i_start) < i64 )
             {
                 p_sys->i_subtitle++;
             }
@@ -682,6 +815,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
     }
 }
 
+
 /*****************************************************************************
  * Demux: Send subtitle to decoder
  *****************************************************************************/
@@ -693,15 +827,15 @@ static int Demux( demux_t *p_demux )
     if( p_sys->i_subtitle >= p_sys->i_subtitles )
         return 0;
 
-    i_maxdate = p_sys->i_next_demux_date - var_GetTime( p_demux->p_parent, "spu-delay" );;
+    i_maxdate = p_sys->i_next_demux_date;
     if( i_maxdate <= 0 && p_sys->i_subtitle < p_sys->i_subtitles )
     {
         /* Should not happen */
-        i_maxdate = p_sys->subtitle[p_sys->i_subtitle].i_start + 1;
+        i_maxdate = adjust_subtitle_time(p_demux, p_sys->subtitle[p_sys->i_subtitle].i_start) + 1;
     }
-
+    
     while( p_sys->i_subtitle < p_sys->i_subtitles &&
-           p_sys->subtitle[p_sys->i_subtitle].i_start < i_maxdate )
+           adjust_subtitle_time(p_demux, p_sys->subtitle[p_sys->i_subtitle].i_start) < i_maxdate )
     {
         const subtitle_t *p_subtitle = &p_sys->subtitle[p_sys->i_subtitle];
 
@@ -721,9 +855,9 @@ static int Demux( demux_t *p_demux )
         }
 
         p_block->i_dts =
-        p_block->i_pts = VLC_TS_0 + p_subtitle->i_start;
+        p_block->i_pts = VLC_TS_0 + adjust_subtitle_time(p_demux, p_subtitle->i_start);
         if( p_subtitle->i_stop >= 0 && p_subtitle->i_stop >= p_subtitle->i_start )
-            p_block->i_length = p_subtitle->i_stop - p_subtitle->i_start;
+            p_block->i_length = adjust_subtitle_time(p_demux, p_subtitle->i_stop) - adjust_subtitle_time(p_demux, p_subtitle->i_start);
 
         memcpy( p_block->p_buffer, p_subtitle->psz_text, i_len );
 
@@ -733,10 +867,27 @@ static int Demux( demux_t *p_demux )
     }
 
     /* */
+    p_sys->i_last_demux_date = p_sys->i_next_demux_date;
     p_sys->i_next_demux_date = 0;
 
     return 1;
 }
+
+
+/*****************************************************************************
+ * adjust_subtitle_time : receives a subtitle timestamp as input 
+ *                     (p_subtitle->i_start or p_subtitle->i_stop) 
+ *                      and returns that timestamp corrected 
+ *                      by spu-delay
+ *****************************************************************************/
+static int64_t adjust_subtitle_time( demux_t * p_demux, int64_t i64_when)
+{
+    int64_t spu_delay = var_GetTime( p_demux->p_parent, "spu-delay" );
+    int64_t i64_adjust = i64_when + spu_delay;
+    return i64_adjust;
+}
+
+
 
 /*****************************************************************************
  * Fix: fix time stamp and order of subtitle

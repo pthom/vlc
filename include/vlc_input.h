@@ -380,8 +380,6 @@ typedef enum input_event_type_e
 
     /* "audio-delay" has changed */
     INPUT_EVENT_AUDIO_DELAY,
-    /* "spu-delay" has changed */
-    INPUT_EVENT_SUBTITLE_DELAY,
 
     /* "bookmark" has changed */
     INPUT_EVENT_BOOKMARK,

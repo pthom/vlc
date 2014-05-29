@@ -485,6 +485,7 @@ struct vlc_actions *vlc_InitActions (libvlc_int_t *libvlc)
     var_Create (obj, "key-pressed", VLC_VAR_INTEGER);
     var_Create (obj, "global-key-pressed", VLC_VAR_INTEGER);
     var_Create (obj, "key-action", VLC_VAR_INTEGER);
+    var_Create (obj, "key-osdmessage", VLC_VAR_STRING);
 
     /* Initialize from configuration */
     for (size_t i = 0; i < ACTIONS_COUNT; i++)
@@ -546,6 +547,7 @@ void vlc_DeinitActions (libvlc_int_t *libvlc, struct vlc_actions *as)
     var_DelCallback (libvlc, "global-key-pressed", vlc_key_to_action,
                      &as->global_map);
     var_DelCallback (libvlc, "key-pressed", vlc_key_to_action, &as->map);
+    var_Destroy(libvlc, "key-osdmessage");
 
     tdestroy (as->global_map, free);
     tdestroy (as->map, free);
