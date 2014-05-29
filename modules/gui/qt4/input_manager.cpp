@@ -380,7 +380,6 @@ static int InputEvent( vlc_object_t *p_this, const char *,
         break;
 
     case INPUT_EVENT_AUDIO_DELAY:
-    case INPUT_EVENT_SUBTITLE_DELAY:
         event = new IMEvent( IMEvent::SynchroChanged );
         break;
 

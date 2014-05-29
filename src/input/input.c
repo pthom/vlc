@@ -1102,8 +1102,7 @@ static void UpdatePtsDelay( input_thread_t *p_input )
 
     /* Take care of audio/spu delay */
     const mtime_t i_audio_delay = var_GetTime( p_input, "audio-delay" );
-    const mtime_t i_spu_delay   = var_GetTime( p_input, "spu-delay" );
-    const mtime_t i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
+    const mtime_t i_extra_delay = i_audio_delay;
     if( i_extra_delay < 0 )
         i_pts_delay -= i_extra_delay;
 
@@ -1112,7 +1111,6 @@ static void UpdatePtsDelay( input_thread_t *p_input )
 
     /* */
     es_out_SetDelay( p_input->p->p_es_out_display, AUDIO_ES, i_audio_delay );
-    es_out_SetDelay( p_input->p->p_es_out_display, SPU_ES, i_spu_delay );
     es_out_SetJitter( p_input->p->p_es_out, i_pts_delay, 0, i_cr_average );
 }
 
@@ -1871,12 +1869,6 @@ static bool Control( input_thread_t *p_input,
             input_SendEventAudioDelay( p_input, val.i_time );
             UpdatePtsDelay( p_input );
             break;
-
-        case INPUT_CONTROL_SET_SPU_DELAY:
-            input_SendEventSubtitleDelay( p_input, val.i_time );
-            UpdatePtsDelay( p_input );
-            break;
-
         case INPUT_CONTROL_SET_TITLE:
         case INPUT_CONTROL_SET_TITLE_NEXT:
         case INPUT_CONTROL_SET_TITLE_PREV:

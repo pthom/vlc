@@ -1475,7 +1475,21 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
 
     subsSpin = new SyncWidget( this );
     subsLayout->addWidget( subsSpin, 0, 2, 1, 1 );
-
+    QString subsSpin_Tooltip = qtr( 
+        "In order to set the subtitle track synchronization delay easily, \n"\
+        "you can use the hotkeys :\n"\
+        "\n"\
+        "* Shift-H (audio bookmark)\n"\
+        "* Shift-J (subtitle bookmark) \n"\
+        "* Shift-K (sync bookmarks)\n"\
+        "\n"\            
+        "(Ctrl-Shift-K resets the delay)\n"\
+        "\n"\
+        "(Use these hotkeys directly on the video)\n"
+    );
+    subsSpin->setToolTip(subsSpin_Tooltip);
+    subsLabel->setToolTip(subsSpin_Tooltip);
+        
     QLabel *subSpeedLabel = new QLabel;
     subSpeedLabel->setText( qtr( "Subtitle speed:" ) );
     subsLayout->addWidget( subSpeedLabel, 1, 0, 1, 1 );

@@ -36,7 +36,6 @@ void input_SendEventLength( input_thread_t *p_input, mtime_t i_length );
 void input_SendEventStatistics( input_thread_t *p_input );
 void input_SendEventRate( input_thread_t *p_input, int i_rate );
 void input_SendEventAudioDelay( input_thread_t *p_input, mtime_t i_delay );
-void input_SendEventSubtitleDelay( input_thread_t *p_input, mtime_t i_delay );
 void input_SendEventRecord( input_thread_t *p_input, bool b_recording );
 void input_SendEventTitle( input_thread_t *p_input, int i_title );
 void input_SendEventSeekpoint( input_thread_t *p_input, int i_title, int i_seekpoint );

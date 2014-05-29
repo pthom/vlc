@@ -358,7 +358,6 @@ static int InputEvent(vlc_object_t *p_this, const char *psz_var,
             break;
 
         case INPUT_EVENT_AUDIO_DELAY:
-        case INPUT_EVENT_SUBTITLE_DELAY:
             [[VLCMain sharedInstance] performSelectorOnMainThread:@selector(updateDelays) withObject:nil waitUntilDone:NO];
             break;
 
