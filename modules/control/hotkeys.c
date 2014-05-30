@@ -1013,6 +1013,14 @@ static int ActionEvent( vlc_object_t *libvlc, char const *psz_var,
 
     if ( strcmp( psz_var, "key-osdmessage") == 0)
     {
+        /* Add stars around the OSD to increase its duration (this is a hack, yes! )*/
+        int osd_duration = 1000000;
+        if ( ( strlen(newval.psz_string) > 0) && ( newval.psz_string[0] == '*' ) )
+                osd_duration *= 2;
+        if ( ( strlen(newval.psz_string) > 1) && ( newval.psz_string[1] == '*' ) )
+                osd_duration *= 2;
+        if ( ( strlen(newval.psz_string) > 2) && ( newval.psz_string[1] == '*' ) )
+                osd_duration *= 2;
         if ( strlen(newval.psz_string) > 0 )
         {
             playlist_t *p_playlist = pl_Get( p_intf );
@@ -1022,12 +1030,18 @@ static int ActionEvent( vlc_object_t *libvlc, char const *psz_var,
                 vout_thread_t *p_vout = p_input ? input_GetVout( p_input ) : NULL;// XXXXDZFEEGVDS
                 if( p_vout )
                 {
-                    DisplayMessage(p_vout, "%s", newval.psz_string);
+                    do 
+                    {
+                        vout_OSDText(
+                                p_vout, SPU_DEFAULT_CHANNEL,
+                                SUBPICTURE_ALIGN_TOP|SUBPICTURE_ALIGN_LEFT, 
+                                osd_duration,
+                                newval.psz_string);
+                    } while(0);
                     vlc_object_release( p_vout );
                 }
                 vlc_object_release(p_input);
             }
-
         }
         return VLC_SUCCESS;        
     }

@@ -202,7 +202,6 @@ void input_ControlVarInit ( input_thread_t *p_input )
     val.i_int = 0;
     var_Change( p_input, "sub-isfilesub", VLC_VAR_SETVALUE, &val, 0 );
 
-    
     /* Video ES */
     var_Create( p_input, "video-es", VLC_VAR_INTEGER | VLC_VAR_HASCHOICE );
     text.psz_string = _("Video Track");

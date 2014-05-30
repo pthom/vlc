@@ -1544,7 +1544,23 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
         CONNECT( buttonBookmarkSubtitle, pressed(), this, bookmarkSubtitle() ) ;
 
         QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
-        buttonBookmarkSync->setToolTip(_("You can also use Shift-K on the video"));
+        QString buttonBookmarkSync_Tooltip = qtr( 
+            "You can also use Shift-K on the video\n"\
+            "\n"\
+            "\n"\
+            "If the subtitle has a different fps,\n"\
+            "(ie the delay varies during the movie):\n"\
+            "\n"\
+            "* sync the subtitles at the beginning of the video\n"\
+            "* fast forward a few minutes in the movie\n"\
+            "* then resync the subtitles.\n"\
+            "\n"\
+            "If applicable, you will be asked to change the fps\n"\
+            "of the subtitle.\n"\
+        );
+        buttonBookmarkSync->setToolTip( buttonBookmarkSync_Tooltip );
+        subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
+
         subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
         CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
 
