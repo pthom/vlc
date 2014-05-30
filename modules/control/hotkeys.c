@@ -1020,7 +1020,8 @@ static int ActionEvent( vlc_object_t *libvlc, char const *psz_var,
             playlist_t *p_playlist = pl_Get( p_intf );
             input_thread_t *p_input = playlist_CurrentInput( p_playlist );
             vout_thread_t *p_vout = p_input ? input_GetVout( p_input ) : NULL;
-            DisplayMessage(p_vout, "%s", newval.psz_string);
+            if (p_vout)
+                DisplayMessage(p_vout, "%s", newval.psz_string);
         }
         return VLC_SUCCESS;        
     }
