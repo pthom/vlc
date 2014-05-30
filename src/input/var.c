@@ -194,6 +194,12 @@ void input_ControlVarInit ( input_thread_t *p_input )
     val.i_time = 0;
     var_Change( p_input, "spu-delay", VLC_VAR_SETVALUE, &val, NULL );
 
+    /*spu-speed*/
+    var_Create( p_input, "spu-speed", VLC_VAR_FLOAT );
+    val.f_float = 1.f;
+    var_Change( p_input, "spu-speed", VLC_VAR_SETVALUE, &val, NULL );
+
+    
     /* Video ES */
     var_Create( p_input, "video-es", VLC_VAR_INTEGER | VLC_VAR_HASCHOICE );
     text.psz_string = _("Video Track");

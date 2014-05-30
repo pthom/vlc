@@ -30,7 +30,7 @@
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
-
+#include <math.h>
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_input.h>
@@ -144,6 +144,23 @@ typedef struct
     char    *psz_text;
 } subtitle_t;
 
+/* The only fps considered valid are : { 23.976f, 24.f, 25.f, 30.f }
+ * 13 = 1 + nb of partial permutations of 2 elements in a set  of 4 := 1 + 4! / (4 - 2 ) ! 
+ * We add one in order to store a fps_ratio = 1.f
+ */
+#define NB_SPU_FPS_ADJUSTS 13
+typedef struct spu_fps_adjust
+{
+    float fps_ratio;
+    char  sz_desc[15];
+} spu_fps_adjust;
+
+struct spu_speed_delay
+{
+    int64_t spu_delay;
+    int idx_spu_fps_adjust;
+};
+
 
 struct demux_sys_t
 {
@@ -184,8 +201,17 @@ struct demux_sys_t
     {
         int64_t i_time_subtitle;
         int64_t i_time_audio;
+        int64_t i_time_subtitle_n_1;
+        int64_t i_time_audio_n_1;
     } subtitle_delaybookmarks;
 
+    /*lists of possible subtitle fps adjustments*/
+    spu_fps_adjust spu_fps_adjusts[NB_SPU_FPS_ADJUSTS];
+    
+    /* holds a delay + speed change that needs user confirmation*/
+    struct spu_speed_delay sub_speed_delay_user_confirm;
+    /*holds the current speed and delay*/
+    struct spu_speed_delay sub_speed_delay_current;
 };
 
 static int  ParseMicroDvd   ( demux_t *, subtitle_t *, int );
@@ -249,6 +275,272 @@ static int set_current_subtitle_by_time(demux_t *p_demux, int64_t i64_when);
 
 
 /*****************************************************************************
+ * Compute subtitles delay and speed
+ *****************************************************************************/
+
+
+static void LogDelays(demux_t *p_demux)
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+    msg_Dbg(p_demux,
+            "ApplySubtitleDelayAndSpeed : audio0=%li sub0=%li audio1=%li sub1=%li",
+            (p_sys->subtitle_delaybookmarks.i_time_audio_n_1) / 1000,
+            (p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1) / 1000,
+            (p_sys->subtitle_delaybookmarks.i_time_audio) / 1000,
+            (p_sys->subtitle_delaybookmarks.i_time_subtitle) / 1000
+            );
+}
+static void Log_speed_delay(demux_t *p_demux)
+{
+    int64_t spu_delay = var_GetTime( p_demux->p_parent, "spu-delay");
+    float spu_speed = var_GetFloat( p_demux->p_parent, "spu-speed");
+    msg_Dbg(p_demux,
+            "spu_speed: %.2f spu-delay : %li",
+            spu_speed,
+            spu_delay / 1000
+            );       
+}
+
+/* Fills the lists of possible subtitle fps adjustments
+ * The only fps considered valid are : { 23.976f, 24.f, 25.f, 30.f }
+ * Subtitle sync will only propose speed adjustments in that range...
+ */
+static void fill_spu_fps_adjusts(demux_t *p_demux)
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+
+    float fps_list[] = { 23.976f, 24.f, 25.f, 30.f };
+    int i, j;
+    float nb_fps = 4;
+
+    p_sys->spu_fps_adjusts[0].fps_ratio = 1.f;
+    p_sys->spu_fps_adjusts[0].sz_desc[0] = '\0';
+
+    int cur_id = 1;//will vary between 1 and NB_SPU_FPS_ADJUSTS - 1
+    for (i = 0; i < nb_fps; i++)
+    {
+        for (j = 0; j < nb_fps; j++)
+        {
+            if (j != i)
+            {
+                p_sys->spu_fps_adjusts[ cur_id ].fps_ratio = fps_list[i] / fps_list[j];
+                snprintf(p_sys->spu_fps_adjusts[ cur_id ].sz_desc, 15, 
+                        "%.6g->%.6g fps", fps_list[i], fps_list[j]);
+                cur_id ++;
+            }
+        }
+    }
+}
+
+/*
+ * Returns 1 if a change of subtitle speed (aka fps) is advisable, 0 otherwise
+ */
+static int ComputeSpuSpeedAndDelay( demux_t *p_demux, struct spu_speed_delay * out_spu_speed_delay )
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+
+    /* If we do not have older bookmarks, cancel! */
+    if (       ( p_sys->subtitle_delaybookmarks.i_time_audio_n_1 <= 0 ) 
+            || ( p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 <= 0 ) )
+    {
+        return 0;
+    }
+
+    /*No need to do it if there is less than 45 seconds between now and the last bookmarks 
+    (the user is probably readjusting the delay)*/
+    int64_t min_delay = 45 * 1000 * 1000;
+    if (    p_sys->subtitle_delaybookmarks.i_time_subtitle 
+          - p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 < min_delay )
+    {
+        return 0;
+    }
+
+    /* If the speed was already adjusted, cancel, 
+     * unless we have a duration > 5 minutes between the two samples, in which
+     * case, we can fine-tune the speed
+     */
+    int64_t min_delay_with_speed_already_set = 60 * 5 * 1000 * 1000;
+    if  (    ( p_sys->sub_speed_delay_current.idx_spu_fps_adjust != 0 )
+          && (   p_sys->subtitle_delaybookmarks.i_time_subtitle 
+               - p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 < min_delay_with_speed_already_set )
+        )
+    {
+        return 0;
+    }
+
+    float audio0 = (float)p_sys->subtitle_delaybookmarks.i_time_audio_n_1 / 1000.f;
+    float subtitle0 = p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 / 1000.f;
+    float audio1 = (float)p_sys->subtitle_delaybookmarks.i_time_audio / 1000.f;
+    float subtitle1 = p_sys->subtitle_delaybookmarks.i_time_subtitle / 1000.f;
+
+    float time0 = __MAX(audio0, subtitle0);
+    float time1 = __MAX(audio1, subtitle1);
+    int64_t i_delay0 = var_GetTime(p_demux->p_parent, "spu-delay");
+    float delay0 = (float)i_delay0 / 1000.f;
+    int64_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
+    float delay1 = delay0 + (float)i_additional_subdelay / 1000.f;
+
+    float spu_speed = 1.f / ( (time1 + delay1) - (time0 + delay0) ) * (time1 - time0);
+    float spu_delay = delay0 + (0.f - time0 ) * ( delay1 - delay0 ) / (time1 - time0);
+
+    msg_Dbg(p_demux, "ComputeSpuSpeedAndDelay speed=%.2f delay=%.0f",
+            spu_speed, spu_delay);
+
+    /*
+     * We now have a speed ratio candidate.
+     * We then compare it to the list of possible speed ratios, 
+     * and we check if one the ratios is applicable
+     * ==> We will select the closest ratio amongst the applicable ratios
+     */
+    int i;
+    int idx_closest_ratio = -1;
+    float error_closest_ratio = 1E5;
+    /* we allow 33% of user error, i.e if the desired ratio is 
+     * 24 / 25 fps = 0.96
+     * then we allow it to vary between 0.96 +/- 0.33 * (1 - 0.96)
+     * ie between 0.9468 and 0.9732
+     */
+    float max_error_applicable = 0.33;
+    for ( i = 0; i < NB_SPU_FPS_ADJUSTS; i++)
+    {
+        /* do not forget to substract 1 in order to have a usable ratio ! */
+        float ratio_ratio = 
+                ( spu_speed - 1.f) 
+            / ( p_sys->spu_fps_adjusts[i].fps_ratio - 1.f );
+        float error_this_ratio = fabs ( ratio_ratio - 1.f );
+
+        if ( ( error_this_ratio < max_error_applicable) && ( error_this_ratio < error_closest_ratio ) )
+        {
+            error_closest_ratio = error_this_ratio;
+            idx_closest_ratio = i;
+        }
+    }
+
+    if (idx_closest_ratio >= 0)
+    {
+        float spu_delay_applicable = delay0 + (0.f - time0 ) * ( delay1 - delay0 ) / (time1 - time0);
+        out_spu_speed_delay->spu_delay = (int64_t) (spu_delay_applicable  * 1000.f );
+        out_spu_speed_delay->idx_spu_fps_adjust = idx_closest_ratio;
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+
+/* Returns 1 if a change of delay is possible, 0 otherwise*/
+static int ComputeSpuDelay_Only( demux_t *p_demux, struct spu_speed_delay * out_spu_speed_delay )
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+
+    if ( (p_sys->subtitle_delaybookmarks.i_time_audio == 0) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == 0) )
+    {
+        char osd_message[200];
+        snprintf(osd_message, 200, 
+                _("Sub sync: set bookmarks first! (delay=%li %s)"),
+                p_sys->sub_speed_delay_current.spu_delay / 1000,
+                p_sys->spu_fps_adjusts[p_sys->sub_speed_delay_current.idx_spu_fps_adjust].sz_desc
+                );
+        var_SetString(p_demux->p_libvlc, "key-osdmessage", osd_message);
+        return 0;
+    }
+
+    int64_t i_previous_subdelay = var_GetTime( p_demux->p_parent, "spu-delay" );
+    int64_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
+    int64_t i_current_subdelay = i_previous_subdelay + i_additional_subdelay;
+
+    out_spu_speed_delay->spu_delay = i_current_subdelay;
+    out_spu_speed_delay->idx_spu_fps_adjust = p_sys->sub_speed_delay_current.idx_spu_fps_adjust;
+    return 1;
+}
+
+static void Apply_spu_speed_delay(demux_t *p_demux, struct spu_speed_delay speed_delay,
+                                  int enable_osd)
+{
+    char osd_message[200];
+    demux_sys_t *p_sys = p_demux->p_sys;
+    if ( speed_delay.idx_spu_fps_adjust == 0 )
+    {
+        snprintf(
+                osd_message, 200, 
+                _( "Sub sync: corrected, total delay = %li ms"),
+                speed_delay.spu_delay / 1000 
+                );
+    }
+    else
+    {
+        snprintf(
+                osd_message, 200, 
+                _( "Sub sync: corrected, delay = %li ms / %s"),
+                speed_delay.spu_delay / 1000,
+                p_sys->spu_fps_adjusts[speed_delay.idx_spu_fps_adjust].sz_desc
+                );
+    }
+    if (enable_osd)
+        var_SetString(p_demux->p_libvlc, "key-osdmessage", osd_message);
+    
+    p_sys->sub_speed_delay_current = speed_delay;
+    var_SetTime( p_demux->p_parent, "spu-delay", speed_delay.spu_delay);
+    var_SetFloat( p_demux->p_parent, "spu-speed", p_sys->spu_fps_adjusts[speed_delay.idx_spu_fps_adjust].fps_ratio);
+    set_current_subtitle_by_time(p_demux, p_sys->i_last_demux_date);
+}
+
+static void ApplySubtitleDelay(demux_t *p_demux)
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+    LogDelays(p_demux);
+
+    struct spu_speed_delay speed_delay;
+    
+    if ( 
+            ( p_sys->sub_speed_delay_user_confirm.idx_spu_fps_adjust >= 0)
+         && ( p_sys->subtitle_delaybookmarks.i_time_audio == 0 )
+         && ( p_sys->subtitle_delaybookmarks.i_time_subtitle == 0 )
+        )   
+    {
+        Apply_spu_speed_delay(p_demux, p_sys->sub_speed_delay_user_confirm, 1);
+        p_sys->sub_speed_delay_user_confirm.idx_spu_fps_adjust = -1;
+    }
+    else
+    {
+        p_sys->sub_speed_delay_user_confirm.idx_spu_fps_adjust = -1;
+
+        int enable_osd = 1;
+        if ( ComputeSpuSpeedAndDelay( p_demux, &speed_delay ) )
+        {
+            char osd_message[200];
+            snprintf( osd_message, 200,
+                     _("** Press Shift-K again to correct fps: %s fps **"),
+                     p_sys->spu_fps_adjusts[ speed_delay.idx_spu_fps_adjust ].sz_desc
+                    );
+            var_SetString(p_demux->p_libvlc, "key-osdmessage", osd_message);        
+            enable_osd = 0;
+
+            p_sys->sub_speed_delay_user_confirm = speed_delay;
+        }
+
+        if ( ComputeSpuDelay_Only( p_demux, &speed_delay ) )
+            Apply_spu_speed_delay(p_demux, speed_delay, enable_osd);        
+    }
+    
+    
+    //Store old timestamps in n-1 bookmarks
+    p_sys->subtitle_delaybookmarks.i_time_audio_n_1 = p_sys->subtitle_delaybookmarks.i_time_audio;
+    p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 = p_sys->subtitle_delaybookmarks.i_time_subtitle;
+    //Clear current bookmarks
+    p_sys->subtitle_delaybookmarks.i_time_audio = 0;
+    p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+    
+    Log_speed_delay(p_demux);
+}
+
+
+
+
+
+/*****************************************************************************
  * external callbacks
  *****************************************************************************/
 int subtitle_external_callback ( vlc_object_t * ,char const *, vlc_value_t old_value, vlc_value_t new_value, void * callback_data);
@@ -278,31 +570,16 @@ int subtitle_external_callback (
     }
     if ( ! strcmp(variable_name, "spu-syncbookmarks") )
     {
-        if ( (p_sys->subtitle_delaybookmarks.i_time_audio == 0) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == 0) )
-        {
-            var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: set bookmarks first!"));
-        }
-        else
-        {
-            int64_t i_current_subdelay = var_GetTime( p_demux->p_parent, "spu-delay" );
-            int64_t i_additional_subdelay = p_sys->subtitle_delaybookmarks.i_time_audio - p_sys->subtitle_delaybookmarks.i_time_subtitle;
-            int64_t i_total_subdelay = i_current_subdelay + i_additional_subdelay;
-            var_SetTime( p_demux->p_parent, "spu-delay", i_total_subdelay);
-            char message[150];
-            snprintf(message, 150, 
-                    _( "Sub sync: corrected %i ms (total delay = %i ms)" ),
-                                    (int)(i_additional_subdelay / 1000),
-                                    (int)(i_total_subdelay / 1000) );
-            var_SetString(p_demux->p_libvlc, "key-osdmessage", message);
-            p_sys->subtitle_delaybookmarks.i_time_audio = 0;
-            p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
-        }
+        ApplySubtitleDelay(p_demux);
     }
     if ( ! strcmp(variable_name, "spu-syncreset") )
     {
         var_SetTime( p_demux->p_parent, "spu-delay", 0);
         p_sys->subtitle_delaybookmarks.i_time_audio = 0;
         p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+        p_sys->subtitle_delaybookmarks.i_time_audio_n_1 = 0;
+        p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 = 0;
+        set_current_subtitle_by_time(p_demux, p_sys->i_last_demux_date);
         var_SetString(p_demux->p_libvlc, "key-osdmessage", _("Sub sync: delay reset"));
         return VLC_SUCCESS;
     }    
@@ -339,12 +616,19 @@ static int Open ( vlc_object_t *p_this )
     p_demux->p_sys = p_sys = malloc( sizeof( demux_sys_t ) );
     if( p_sys == NULL )
         return VLC_ENOMEM;
-    
+
+    fill_spu_fps_adjusts(p_demux);
+
     /* reset spu-delay at Open*/
     var_SetTime( p_demux->p_parent, "spu-delay", 0 );
     
     p_sys->subtitle_delaybookmarks.i_time_audio = 0;
     p_sys->subtitle_delaybookmarks.i_time_subtitle = 0;
+    p_sys->subtitle_delaybookmarks.i_time_audio_n_1 = -1;
+    p_sys->subtitle_delaybookmarks.i_time_subtitle_n_1 = -1;
+    p_sys->sub_speed_delay_user_confirm.idx_spu_fps_adjust = -1;
+    p_sys->sub_speed_delay_current.spu_delay = 0;
+    p_sys->sub_speed_delay_current.idx_spu_fps_adjust = 0;
 
     
     /* Add callbacks*/
@@ -883,7 +1167,8 @@ static int Demux( demux_t *p_demux )
 static int64_t adjust_subtitle_time( demux_t * p_demux, int64_t i64_when)
 {
     int64_t spu_delay = var_GetTime( p_demux->p_parent, "spu-delay" );
-    int64_t i64_adjust = i64_when + spu_delay;
+    float spu_speed = var_GetFloat( p_demux->p_parent, "spu-speed" );
+    int64_t i64_adjust = (int64_t) ( (float)i64_when / spu_speed ) + spu_delay;
     return i64_adjust;
 }
 
