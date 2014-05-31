@@ -242,6 +242,10 @@ private slots:
     void advanceSubs( double );
     void adjustSubsSpeed( double );
     void adjustSubsDuration( double );
+    void bookmarkAudio();
+    void bookmarkSubtitle();
+    void syncBookmarks();
+    void resetSync();
 };
 
 #endif

@@ -512,7 +512,7 @@ static void ApplySubtitleDelay(demux_t *p_demux)
         {
             char osd_message[200];
             snprintf( osd_message, 200,
-                     _("** Press Shift-K again to correct fps: %s fps **"),
+                     _("** Press \"Sync subtitles\" (Shift-K) again to correct fps: %s fps **"),
                      p_sys->spu_fps_adjusts[ speed_delay.idx_spu_fps_adjust ].sz_desc
                     );
             var_SetString(p_demux->p_libvlc, "key-osdmessage", osd_message);        
