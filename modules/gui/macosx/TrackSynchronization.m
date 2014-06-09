@@ -65,7 +65,22 @@ static VLCTrackSynchronization *_o_sharedInstance = nil;
     [o_sv_lbl setStringValue: _NS("Subtitles/Video")];
     [o_sv_advance_lbl setStringValue: _NS("Subtitle track synchronization:")];
     [[o_sv_advance_value_fld formatter] setFormat:[NSString stringWithFormat:@"#,##0.000 %@", _NS("s")]];
-    [o_sv_advance_value_fld setToolTip: _NS("A positive value means that the subtitles are ahead of the video")];
+    [o_sv_advance_value_fld setToolTip: 
+        _NS(
+            "A positive value means that the subtitles are ahead of the video\n"
+            "\n"\
+            "In order to set the subtitle track synchronization delay easily, \n"\
+            "you can use the hotkeys :\n"\
+            "\n"\
+            "* Shift-H (audio bookmark)\n"\
+            "* Shift-J (subtitle bookmark) \n"\
+            "* Shift-K (sync bookmarks)\n"\
+            "\n"\            
+            "(Command-Shift-K resets the delay)\n"\
+            "\n"\
+            "(Use these hotkeys directly on the video)\n" 
+            )
+    ];
     [o_sv_speed_lbl setStringValue: _NS("Subtitle speed:")];
     [[o_sv_speed_value_fld formatter] setFormat:[NSString stringWithFormat:@"#,##0.000 %@", _NS("fps")]];
     [o_sv_dur_lbl setStringValue: _NS("Subtitle duration factor:")];

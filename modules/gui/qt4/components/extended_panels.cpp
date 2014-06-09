@@ -1446,8 +1446,11 @@ void SyncWidget::setValue( double d )
 SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
                             QWidget( _parent ) , p_intf( _p_intf )
 {
-    QGroupBox *AVBox, *subsBox;
+    QGroupBox *AVBox, *subsBox, *subsVisualSyncBox;
     QToolButton *updateButton;
+
+    int isfilesub = var_GetInteger( THEMIM->getInput(), "sub-isfilesub" );
+
 
     b_userAction = true;
 
@@ -1472,9 +1475,28 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
     QLabel *subsLabel = new QLabel;
     subsLabel->setText( qtr( "Subtitle track synchronization:" ) );
     subsLayout->addWidget( subsLabel, 0, 0, 1, 1 );
-
     subsSpin = new SyncWidget( this );
     subsLayout->addWidget( subsSpin, 0, 2, 1, 1 );
+
+    QString subsSpin_Tooltip = qtr( 
+            "A positive value means that the subtitles are ahead of the video\n"
+            "\n"\
+            "In order to set the subtitle track synchronization delay easily, \n"\
+            "you can use the hotkeys :\n"\
+            "\n"\
+            "* Shift-H (audio bookmark)\n"\
+            "* Shift-J (subtitle bookmark) \n"\
+            "* Shift-K (sync bookmarks)\n"\
+            "\n"\            
+            "(Control-Shift-K resets the delay)\n"\
+            "\n"\
+            "(Use these hotkeys directly on the video)\n" 
+    );
+    if (isfilesub)
+    {
+        subsSpin->setToolTip(subsSpin_Tooltip);
+        subsLabel->setToolTip(subsSpin_Tooltip);
+    }
 
     QLabel *subSpeedLabel = new QLabel;
     subSpeedLabel->setText( qtr( "Subtitle speed:" ) );
@@ -1504,6 +1526,35 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
     subsLayout->addWidget( subDurationSpin, 2, 2, 1, 1 );
 
     mainLayout->addWidget( subsBox, 2, 0, 2, 5 );
+
+    /* Subs Visual Sync*/
+    if (isfilesub)
+    {
+        subsVisualSyncBox = new QGroupBox( qtr( "Subtitles Visual Sync" ) );
+        QGridLayout *subsVisualSyncLayout = new QGridLayout( subsVisualSyncBox );
+
+        QPushButton *buttonBookmarkAudio = new QPushButton(_("Bookmark audio"));
+        buttonBookmarkAudio->setToolTip(_("You can also use Shift-H on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkAudio, 0, 0, 1, 1 );
+        CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() ) ;
+
+        QPushButton *buttonBookmarkSubtitle = new QPushButton(_("Bookmark subtitle"));
+        buttonBookmarkSubtitle->setToolTip(_("You can also use Shift-J on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkSubtitle, 0, 1, 1, 1 );
+        CONNECT( buttonBookmarkSubtitle, pressed(), this, bookmarkSubtitle() ) ;
+
+        QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
+        buttonBookmarkSync->setToolTip(_("You can also use Shift-K on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
+        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
+
+        QPushButton *buttonBookmarkResetSync = new QPushButton(_("Reset Sync"));
+        buttonBookmarkResetSync->setToolTip(_("You can also use Ctrl-Shift-K on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkResetSync, 0, 3, 1, 1 );
+        CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() ) ;
+
+        mainLayout->addWidget( subsVisualSyncBox, 4, 0, 1, 5 );
+    }
 
     updateButton = new QToolButton;
     updateButton->setAutoRaise( true );
@@ -1593,6 +1644,27 @@ void SyncControls::adjustSubsDuration( double f_factor )
         ChangeVFiltersString( p_intf, "subsdelay", f_factor > 0 );
     }
 }
+
+void SyncControls::bookmarkAudio()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-bookmarkaudio", 0 );
+
+}
+void SyncControls::bookmarkSubtitle()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-bookmarksubtitle", 0 );
+}
+void SyncControls::syncBookmarks()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-syncbookmarks", 0 );
+    update();
+}
+void SyncControls::resetSync()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-syncreset", 0 );
+    update();
+}
+
 
 void SyncControls::initSubsDuration()
 {
