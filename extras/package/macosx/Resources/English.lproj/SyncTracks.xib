@@ -1,4 +1,75 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Note : 
+ As this file depends on Interface Builder 3,
+ I could not update it in order to add the subtitle sync feature
+ which I added in the Qt "Track Synchronization window" in june 2014
+
+  I prefer not to mess around it, as I am not specialist enough with
+  interface builder...
+
+  Pascal Thomet - 06-2014
+
+
+  Below is the relevant code in QT dialect, if someone has the courage to update the 
+  .xib as well as its callbacks.
+
+    /* Add a panel that contains 4 buttons 
+    (bookmark audio, bookmark subtitle, sync subtitles, reset sync)
+    Make that panel visible if var_GetInteger( THEMIM->getInput(), "sub-isfilesub" ) == 1 
+    */
+
+    int isfilesub = var_GetInteger( THEMIM->getInput(), "sub-isfilesub" );
+
+    /* Subs Visual Sync*/
+    if (isfilesub)
+    {
+        subsVisualSyncBox = new QGroupBox( qtr( "Subtitles Visual Sync" ) );
+        QGridLayout *subsVisualSyncLayout = new QGridLayout( subsVisualSyncBox );
+
+        QPushButton *buttonBookmarkAudio = new QPushButton(_("Bookmark audio"));
+        buttonBookmarkAudio->setToolTip(_("You can also use Shift-H on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkAudio, 0, 0, 1, 1 );
+        CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() ) ;
+
+        QPushButton *buttonBookmarkSubtitle = new QPushButton(_("Bookmark subtitle"));
+        buttonBookmarkSubtitle->setToolTip(_("You can also use Shift-J on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkSubtitle, 0, 1, 1, 1 );
+        CONNECT( buttonBookmarkSubtitle, pressed(), this, bookmarkSubtitle() ) ;
+
+        QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
+        buttonBookmarkSync->setToolTip(_("You can also use Shift-K on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
+        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
+
+        QPushButton *buttonBookmarkResetSync = new QPushButton(_("Reset Sync"));
+        buttonBookmarkResetSync->setToolTip(_("You can also use Ctrl-Shift-K on the video"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkResetSync, 0, 3, 1, 1 );
+        CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() ) ;
+
+        mainLayout->addWidget( subsVisualSyncBox, 4, 0, 1, 5 );
+    }
+
+    //The callbacks are one liners as below :
+    void SyncControls::bookmarkAudio()
+    {
+        var_SetInteger( THEMIM->getInput(), "sub-bookmarkaudio", 0 );
+
+    }
+    void SyncControls::bookmarkSubtitle()
+    {
+        var_SetInteger( THEMIM->getInput(), "sub-bookmarksubtitle", 0 );
+    }
+    void SyncControls::syncBookmarks()
+    {
+        var_SetInteger( THEMIM->getInput(), "sub-syncbookmarks", 0 );
+        update();
+    }
+    void SyncControls::resetSync()
+    {
+        var_SetInteger( THEMIM->getInput(), "sub-syncreset", 0 );
+        update();
+    }
+-->
 <archive type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="7.10">
   <data>
     <int key="IBDocument.SystemTarget">1050</int>
