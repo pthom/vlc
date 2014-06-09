@@ -1,88 +1,117 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Note : 
- As this file depends on Interface Builder 3,
- I could not update it in order to add the subtitle sync feature
- which I added in the Qt "Track Synchronization window" in june 2014
+As this file depends on Interface Builder 3,
+I could not update it in order to add the subtitle sync feature
+which I added in the Qt "Track Synchronization window" in june 2014
 
-  I prefer not to mess around it, as I am not specialist enough with
-  interface builder...
+I prefer not to mess around it, as I am not specialist enough with
+interface builder...
 
-  Pascal Thomet - 06-2014
+Pascal Thomet - 06-2014
 
 
-  Below is the relevant code in QT dialect, if someone has the courage to update the 
-  .xib as well as its callbacks.
+Below is the relevant code in QT dialect, if someone has the courage to update the 
+.xib as well as its callbacks, it would be worthwhile.
 
-    /* Add a panel that contains 4 buttons 
-    (bookmark audio, bookmark subtitle, sync subtitles, reset sync)
-    Make that panel visible if var_GetInteger( THEMIM->getInput(), "sub-isfilesub" ) == 1 
-    */
+/*Add a panel that contains 5 buttons :
+bookmark audio
+bookmark subtitle
+sync subtitles
+reset sync
+save subtitles
+Make that panel visible if 
+var_GetInteger( THEMIM->getInput(), "sub-isfilesub" ) == 1 
+*/
 
-    int isfilesub = var_GetInteger( THEMIM->getInput(), "sub-isfilesub" );
+int isfilesub = var_GetInteger( THEMIM->getInput(), "sub-isfilesub" );
+if (isfilesub)
+{
+    subsVisualSyncBox = new QGroupBox( qtr( "Subtitles Visual Sync" ) );
+    QGridLayout *subsVisualSyncLayout = new QGridLayout( subsVisualSyncBox );
 
-    /* Subs Visual Sync*/
-    if (isfilesub)
+    QPushButton *buttonBookmarkAudio = new QPushButton(_("Bookmark audio"));
+    buttonBookmarkAudio->setToolTip(_("You can also use Shift-H on the video"));
+    subsVisualSyncLayout->addWidget( buttonBookmarkAudio, 0, 0, 1, 1 );
+    CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() ) ;
+
+    QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
+    QString buttonBookmarkSync_Tooltip = qtr( 
+        "You can also use Shift-K on the video\n"\
+        "\n"\
+        "\n"\
+        "If the subtitle has a different fps,\n"\
+        "(ie the delay varies during the movie):\n"\
+        "\n"\
+        "* sync the subtitles at the beginning of the video\n"\
+        "* fast forward a few minutes in the movie\n"\
+        "* then resync the subtitles.\n"\
+        "\n"\
+        "If applicable, you will be asked to change the fps\n"\
+        "of the subtitle.\n"\
+    );
+    buttonBookmarkSync->setToolTip( buttonBookmarkSync_Tooltip );
+    subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
+    CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
+
+    QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
+    buttonBookmarkSync->setToolTip(_("You can also use Shift-K on the video"));
+    subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
+    CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
+
+    QPushButton *buttonBookmarkResetSync = new QPushButton(_("Reset Sync"));
+    buttonBookmarkResetSync->setToolTip(_("You can also use Ctrl-Shift-K on the video"));
+    subsVisualSyncLayout->addWidget( buttonBookmarkResetSync, 0, 3, 1, 1 );
+    CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() ) ;
+
+    mainLayout->addWidget( subsVisualSyncBox, 4, 0, 1, 5 );
+}
+
+//The callbacks are one liners as below :
+void SyncControls::bookmarkAudio()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-bookmarkaudio", 0 );
+}
+void SyncControls::bookmarkSubtitle()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-bookmarksubtitle", 0 );
+}
+void SyncControls::syncBookmarks()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-syncbookmarks", 0 );
+    update();
+}
+void SyncControls::resetSync()
+{
+    var_SetInteger( THEMIM->getInput(), "sub-syncreset", 0 );
+    update();
+}
+
+//The save subtitle callback is a little more lengthy, but nonetheless simple
+void SyncControls::saveSubtitles()
+{
+    char * sub_srt_file_path = var_GetString( THEMIM->getInput(), "sub-srt-file-path");
+    char * sub_srt_file_content = var_GetString( THEMIM->getInput(), "sub-srt-file-content");
+    // open a file save dialog box with a default name for the file    
+    QString fileName_QString = QFileDialog::getSaveFileName(this, _("Save Subtitle as .srt)"),sub_srt_file_path);
+    if (fileName_QString.length() == 0)
+        return;
+    //Convert filename to plain char*
+    QByteArray fileName_ba = fileName_QString.toLocal8Bit();
+    const char *fileName_str = fileName_ba.data();
+    //Save
+    FILE *f =  fopen(fileName_str, "wb"); /* binary! .srt should use CRLF we want to impose this */
+    if (f)
     {
-        subsVisualSyncBox = new QGroupBox( qtr( "Subtitles Visual Sync" ) );
-        QGridLayout *subsVisualSyncLayout = new QGridLayout( subsVisualSyncBox );
-
-        QPushButton *buttonBookmarkAudio = new QPushButton(_("Bookmark audio"));
-        buttonBookmarkAudio->setToolTip(_("You can also use Shift-H on the video"));
-        subsVisualSyncLayout->addWidget( buttonBookmarkAudio, 0, 0, 1, 1 );
-        CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() ) ;
-
-        QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
-        QString buttonBookmarkSync_Tooltip = qtr( 
-            "You can also use Shift-K on the video\n"\
-            "\n"\
-            "\n"\
-            "If the subtitle has a different fps,\n"\
-            "(ie the delay varies during the movie):\n"\
-            "\n"\
-            "* sync the subtitles at the beginning of the video\n"\
-            "* fast forward a few minutes in the movie\n"\
-            "* then resync the subtitles.\n"\
-            "\n"\
-            "If applicable, you will be asked to change the fps\n"\
-            "of the subtitle.\n"\
-        );
-        buttonBookmarkSync->setToolTip( buttonBookmarkSync_Tooltip );
-        subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
-        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
-
-        QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
-        buttonBookmarkSync->setToolTip(_("You can also use Shift-K on the video"));
-        subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
-        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
-
-        QPushButton *buttonBookmarkResetSync = new QPushButton(_("Reset Sync"));
-        buttonBookmarkResetSync->setToolTip(_("You can also use Ctrl-Shift-K on the video"));
-        subsVisualSyncLayout->addWidget( buttonBookmarkResetSync, 0, 3, 1, 1 );
-        CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() ) ;
-
-        mainLayout->addWidget( subsVisualSyncBox, 4, 0, 1, 5 );
+        fprintf(f, "%s", sub_srt_file_content);
+        fclose(f);
+        msg_Warn(THEMIM->getInput(), "Saved subtitles inside %s", fileName_str);
     }
-
-    //The callbacks are one liners as below :
-    void SyncControls::bookmarkAudio()
+    else
     {
-        var_SetInteger( THEMIM->getInput(), "sub-bookmarkaudio", 0 );
+        msg_Err(THEMIM->getInput(), "Could not save subtitles inside %s", fileName_str);
+    }
+}
 
-    }
-    void SyncControls::bookmarkSubtitle()
-    {
-        var_SetInteger( THEMIM->getInput(), "sub-bookmarksubtitle", 0 );
-    }
-    void SyncControls::syncBookmarks()
-    {
-        var_SetInteger( THEMIM->getInput(), "sub-syncbookmarks", 0 );
-        update();
-    }
-    void SyncControls::resetSync()
-    {
-        var_SetInteger( THEMIM->getInput(), "sub-syncreset", 0 );
-        update();
-    }
 -->
 <archive type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="7.10">
   <data>

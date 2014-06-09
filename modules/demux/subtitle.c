@@ -41,6 +41,7 @@
 
 #include <vlc_demux.h>
 #include <vlc_charset.h>
+#include <sys/param.h>
 
 /*****************************************************************************
  * Module descriptor
@@ -213,6 +214,8 @@ struct demux_sys_t
     /*holds the current speed and delay*/
     struct sub_speed_delay sub_speed_delay_current;
 };
+
+static int  StoreAdjustedSubsAsSubRip(demux_t *p_demux);
 
 static int  ParseMicroDvd   ( demux_t *, subtitle_t *, int );
 static int  ParseSubRip     ( demux_t *, subtitle_t *, int );
@@ -660,13 +663,28 @@ static int Open ( vlc_object_t *p_this )
     var_Create(p_demux->p_parent, "sub-bookmarksubtitle", VLC_VAR_INTEGER);
     var_Create(p_demux->p_parent, "sub-syncbookmarks", VLC_VAR_INTEGER);
     var_Create(p_demux->p_parent, "sub-syncreset", VLC_VAR_INTEGER);
+    var_Create(p_demux->p_parent, "sub-srt-file-content", VLC_VAR_STRING);
+    var_Create(p_demux->p_parent, "sub-srt-file-path", VLC_VAR_STRING);
     var_AddCallback( p_demux->p_parent, "sub-bookmarkaudio", &subtitle_external_callback, p_this );
     var_AddCallback( p_demux->p_parent, "sub-bookmarksubtitle", &subtitle_external_callback, p_this );
     var_AddCallback( p_demux->p_parent, "sub-syncbookmarks", &subtitle_external_callback, p_this );
     var_AddCallback( p_demux->p_parent, "sub-syncreset", &subtitle_external_callback, p_this );
     var_AddCallback( p_demux->p_parent, "spu-delay", &subtitle_external_callback, p_this );
 
-    
+    /*Set srt-file-path :
+     * File path to be suggested if the user 
+     * chooses to save the subtitles with adjusted timings
+     */
+    {
+        char path[MAXPATHLEN];
+        strncpy(path, p_demux->s->psz_path, MAXPATHLEN);
+        char *extensionStart = rindex(path, '.');
+        if ( extensionStart )
+            *extensionStart = '\0';
+        strncat(path, "_adjusted.srt", MAXPATHLEN);
+        var_SetString(p_demux->p_parent, "sub-srt-file-path", path);
+    }
+
     p_sys->psz_header         = NULL;
     p_sys->i_subtitle         = 0;
     p_sys->i_subtitles        = 0;
@@ -986,6 +1004,8 @@ static int Open ( vlc_object_t *p_this )
     p_sys->es = es_out_Add( p_demux->out, &fmt );
     es_format_Clean( &fmt );
 
+    StoreAdjustedSubsAsSubRip(p_demux);
+
     return VLC_SUCCESS;
 }
 
@@ -1010,7 +1030,8 @@ static void Close( vlc_object_t *p_this )
     var_Destroy(p_demux->p_parent, "sub-bookmarksubtitle");
     var_Destroy(p_demux->p_parent, "sub-syncbookmarks");
     var_Destroy(p_demux->p_parent, "sub-syncreset");
-
+    var_Destroy(p_demux->p_parent, "sub-srt-file-content");
+    var_Destroy(p_demux->p_parent, "sub-srt-file-path");
 
     int i;
     for( i = 0; i < p_sys->i_subtitles; i++ )
@@ -1045,6 +1066,8 @@ static int set_current_subtitle_by_time(demux_t *p_demux, int64_t i64_when)
 
     if( p_sys->i_subtitle >= p_sys->i_subtitles )
         return VLC_EGENERIC;
+
+    StoreAdjustedSubsAsSubRip(p_demux);
     return VLC_SUCCESS;
 }
 
@@ -1498,6 +1521,96 @@ static int  ParseSubRip( demux_t *p_demux, subtitle_t *p_subtitle,
                                  &subtitle_ParseSubRipTiming,
                                  false );
 }
+
+static void WriteSubViewerTiming(char *dst, int dstLength, int64_t time)
+{
+    float seconds_total_float = (float)time / ( 1000.f * 1000.f);
+    int   seconds_total = (int)seconds_total_float;
+
+    float decimals_float = seconds_total_float - (int) seconds_total_float;
+    int decimals_int = (int) (decimals_float * 1000.f + 0.5f);
+    int seconds = seconds_total % 60;
+
+    int minutes_total = (seconds_total - seconds) / 60;
+    int minutes = minutes_total % 60;
+
+    int hours_total = (minutes_total - minutes) / 60;
+
+    snprintf( dst, dstLength, "%02i:%02i:%02i,%03i", hours_total, minutes, seconds, decimals_int);
+}
+
+/* Creates a string that contains the content of a .srt file
+ * with adjusted timings and stores it inside the var
+ * "sub-srt-file-content"
+ */
+static int StoreAdjustedSubsAsSubRip(demux_t *p_demux)
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+    //we increment the buffer size by 10kB increments
+    const size_t bufferIncrement = 1024 * 10;
+    char * buffer = (char *) malloc(bufferIncrement);
+    if ( ! buffer )
+        return VLC_ENOMEM;
+    size_t bufferLength = bufferIncrement;
+    buffer[0] = 0;
+
+    //Max length for one subtitle info
+    const int oneSubtitleBufferLength = 3000;
+    char oneSubtitleBuffer[oneSubtitleBufferLength];
+
+    int i = 0;
+    char subIndexBuffer[20];
+    char time1Buffer[40];
+    char time2Buffer[40];
+    char timingBuffer[100];
+    char subtitleContent[2000];
+    for ( i = 0; i < p_sys->i_subtitles; i++)
+    {
+        const subtitle_t *p_subtitle = &p_sys->subtitle[i];
+        int64_t i_start_adjust = adjust_subtitle_time(p_demux, p_subtitle->i_start);
+        int64_t i_end_adjust = adjust_subtitle_time(p_demux, p_subtitle->i_stop);
+        
+        snprintf(subIndexBuffer, 20, "%i", i + 1);
+
+        WriteSubViewerTiming(time1Buffer, 40, i_start_adjust);
+        WriteSubViewerTiming(time2Buffer, 40, i_end_adjust);
+        snprintf(timingBuffer, 100, "%s --> %s", time1Buffer, time2Buffer);
+       
+        strncpy(subtitleContent, p_subtitle->psz_text, 2000);
+        {
+            /* strip the last EOL that might already terminate the subtitle*/
+            size_t len = strlen(subtitleContent);
+            if (       ( len >= 2 ) 
+                    && ( subtitleContent[len - 2 ] == '\r' ) 
+                    && (subtitleContent[len - 2 ] == '\n' ) )
+            {
+                subtitleContent[len - 2 ] = 0;
+            }
+            if ( ( len >= 1 ) && ( subtitleContent[len - 1 ] == '\n' ) )
+            {
+                subtitleContent[len - 1 ] = 0;
+            }            
+        }
+
+        snprintf( oneSubtitleBuffer, oneSubtitleBufferLength, "%s\r\n%s\r\n%s\r\n\r\n", 
+                  subIndexBuffer, timingBuffer, subtitleContent);
+
+        int nbBytesToAppend = strlen(oneSubtitleBuffer);
+
+        if ( strlen(buffer) + nbBytesToAppend >= bufferLength )
+        {
+            buffer = realloc(buffer, bufferLength + bufferIncrement);            
+            if ( ! buffer )
+                return VLC_ENOMEM;
+            bufferLength = bufferLength + bufferIncrement;
+        }
+        strncat(buffer, oneSubtitleBuffer, nbBytesToAppend);
+    }
+    var_SetString(p_demux->p_parent, "sub-srt-file-content", buffer);
+    free(buffer);
+    return VLC_SUCCESS;
+}
+
 
 /* subtitle_ParseSubViewerTiming
  * Parses SubViewer timing.

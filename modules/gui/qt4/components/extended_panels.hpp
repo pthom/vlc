@@ -246,6 +246,7 @@ private slots:
     void bookmarkSubtitle();
     void syncBookmarks();
     void resetSync();
+    void saveSubtitles();
 };
 
 #endif

@@ -1536,12 +1536,12 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
         QPushButton *buttonBookmarkAudio = new QPushButton(_("Bookmark audio"));
         buttonBookmarkAudio->setToolTip(_("You can also use Shift-H on the video"));
         subsVisualSyncLayout->addWidget( buttonBookmarkAudio, 0, 0, 1, 1 );
-        CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() ) ;
+        CONNECT( buttonBookmarkAudio, pressed(), this, bookmarkAudio() );
 
         QPushButton *buttonBookmarkSubtitle = new QPushButton(_("Bookmark subtitle"));
         buttonBookmarkSubtitle->setToolTip(_("You can also use Shift-J on the video"));
         subsVisualSyncLayout->addWidget( buttonBookmarkSubtitle, 0, 1, 1, 1 );
-        CONNECT( buttonBookmarkSubtitle, pressed(), this, bookmarkSubtitle() ) ;
+        CONNECT( buttonBookmarkSubtitle, pressed(), this, bookmarkSubtitle() );
 
         QPushButton *buttonBookmarkSync = new QPushButton(_("Sync subtitles"));
         QString buttonBookmarkSync_Tooltip = qtr( 
@@ -1562,12 +1562,17 @@ SyncControls::SyncControls( intf_thread_t *_p_intf, QWidget *_parent ) :
         subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
 
         subsVisualSyncLayout->addWidget( buttonBookmarkSync, 0, 2, 1, 1 );
-        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() ) ;
+        CONNECT( buttonBookmarkSync, pressed(), this, syncBookmarks() );
 
         QPushButton *buttonBookmarkResetSync = new QPushButton(_("Reset Sync"));
         buttonBookmarkResetSync->setToolTip(_("You can also use Ctrl-Shift-K on the video"));
         subsVisualSyncLayout->addWidget( buttonBookmarkResetSync, 0, 3, 1, 1 );
-        CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() ) ;
+        CONNECT( buttonBookmarkResetSync, pressed(), this, resetSync() );
+
+        QPushButton *buttonBookmarkSaveSubs = new QPushButton(_("Save Subs"));
+        buttonBookmarkSaveSubs->setToolTip(_("Save adjusted subtitles"));
+        subsVisualSyncLayout->addWidget( buttonBookmarkSaveSubs, 0, 4, 1, 1 );
+        CONNECT( buttonBookmarkSaveSubs, pressed(), this, saveSubtitles() );
 
         mainLayout->addWidget( subsVisualSyncBox, 4, 0, 1, 5 );
     }
@@ -1681,6 +1686,31 @@ void SyncControls::resetSync()
     update();
 }
 
+
+void SyncControls::saveSubtitles()
+{
+    char * sub_srt_file_path = var_GetString( THEMIM->getInput(), "sub-srt-file-path");
+    char * sub_srt_file_content = var_GetString( THEMIM->getInput(), "sub-srt-file-content");
+
+    QString fileName_QString = QFileDialog::getSaveFileName(this, _("Save Subtitle as .srt)"),
+                            sub_srt_file_path);
+    if (fileName_QString.length() == 0)
+        return;
+    QByteArray fileName_ba = fileName_QString.toLocal8Bit();
+    const char *fileName_str = fileName_ba.data();
+
+    FILE *f =  fopen(fileName_str, "wb"); /* binary! .srt should use CRLF we want to impose this */
+    if (f)
+    {
+        fprintf(f, "%s", sub_srt_file_content);
+        fclose(f);
+        msg_Warn(THEMIM->getInput(), "Saved subtitles inside %s", fileName_str);
+    }
+    else
+    {
+        msg_Err(THEMIM->getInput(), "Could not save subtitles inside %s", fileName_str);
+    }
+}
 
 void SyncControls::initSubsDuration()
 {
