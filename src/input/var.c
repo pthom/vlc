@@ -195,6 +195,14 @@ void input_ControlVarInit ( input_thread_t *p_input )
     val.i_time = 0;
     var_Change( p_input, "spu-delay", VLC_VAR_SETVALUE, &val, NULL );
 
+    /*sub-isfilesub will be 
+     * - equal to 1 when the subtitle is read from a file (for example a .srt file), 
+     * - equal to 0 otherwise (for example dvd subtitles)*/
+    var_Create( p_input, "sub-isfilesub", VLC_VAR_INTEGER );
+    val.i_int = 0;
+    var_Change( p_input, "sub-isfilesub", VLC_VAR_SETVALUE, &val, 0 );
+
+    
     /* Video ES */
     var_Create( p_input, "video-es", VLC_VAR_INTEGER | VLC_VAR_HASCHOICE );
     text.psz_string = _("Video Track");
@@ -789,7 +797,9 @@ static int EsDelayCallback ( vlc_object_t *p_this, char const *psz_cmd,
     }
     else if( !strcmp( psz_cmd, "spu-delay" ) )
     {
-        input_ControlPush( p_input, INPUT_CONTROL_SET_SPU_DELAY, &newval );
+        int isfilesub = var_GetInteger(p_input, "sub-isfilesub");
+        if ( ! isfilesub )
+            input_ControlPush( p_input, INPUT_CONTROL_SET_SPU_DELAY, &newval );
     }
     return VLC_SUCCESS;
 }

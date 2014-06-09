@@ -1103,7 +1103,14 @@ static void UpdatePtsDelay( input_thread_t *p_input )
     /* Take care of audio/spu delay */
     const mtime_t i_audio_delay = var_GetTime( p_input, "audio-delay" );
     const mtime_t i_spu_delay   = var_GetTime( p_input, "spu-delay" );
-    const mtime_t i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
+    int isfilesub =var_GetInteger(p_input, "sub-isfilesub");
+    
+    mtime_t i_extra_delay;
+    if ( isfilesub )
+        i_extra_delay = i_audio_delay;
+    else
+        i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
+
     if( i_extra_delay < 0 )
         i_pts_delay -= i_extra_delay;
 
