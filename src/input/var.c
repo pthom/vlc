@@ -188,6 +188,11 @@ void input_ControlVarInit ( input_thread_t *p_input )
                     1000 * var_GetInteger( p_input, "audio-desync" ) );
     var_Create( p_input, "spu-delay", VLC_VAR_INTEGER );
 
+    /* sub-isfilesub : true for *.srt & the like, false otherwise (for example dvd subtitles) */
+    var_Create( p_input, "sub-isfilesub", VLC_VAR_BOOL );
+    val.b_bool = false;
+    var_Change( p_input, "sub-isfilesub", VLC_VAR_SETVALUE, &val, 0 );
+
     val.i_int = -1;
     /* Video ES */
     var_Create( p_input, "video-es", VLC_VAR_INTEGER );
@@ -819,7 +824,9 @@ static int EsDelayCallback ( vlc_object_t *p_this, char const *psz_cmd,
     }
     else if( !strcmp( psz_cmd, "spu-delay" ) )
     {
-        input_ControlPush( p_input, INPUT_CONTROL_SET_SPU_DELAY, &newval );
+        bool isfilesub = var_GetBool(p_input, "sub-isfilesub");
+        if ( ! isfilesub )
+            input_ControlPush( p_input, INPUT_CONTROL_SET_SPU_DELAY, &newval );
     }
     return VLC_SUCCESS;
 }

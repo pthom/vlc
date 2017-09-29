@@ -1066,6 +1066,9 @@ static void LoadSlaves( input_thread_t *p_input )
     int i_slaves;
     TAB_INIT( i_slaves, pp_slaves );
 
+    /* sub-isfilesub will be set to true inside input_SlaveSourceAdd (if needed)*/
+    var_SetBool(p_input, "sub-isfilesub", false);
+
     /* Look for and add slaves */
 
     char *psz_subtitle = var_GetNonEmptyString( p_input, "sub-file" );
@@ -1221,7 +1224,14 @@ static void UpdatePtsDelay( input_thread_t *p_input )
     /* Take care of audio/spu delay */
     const mtime_t i_audio_delay = var_GetInteger( p_input, "audio-delay" );
     const mtime_t i_spu_delay   = var_GetInteger( p_input, "spu-delay" );
-    const mtime_t i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
+    bool isfilesub = var_GetBool(p_input, "sub-isfilesub");
+
+    mtime_t i_extra_delay;
+    if ( isfilesub )
+        i_extra_delay = i_audio_delay;
+    else
+        i_extra_delay = __MIN( i_audio_delay, i_spu_delay );
+
     if( i_extra_delay < 0 )
         i_pts_delay -= i_extra_delay;
 
@@ -1307,6 +1317,9 @@ static int Init( input_thread_t * p_input )
         var_SetString( p_input, "sub-file", "" );
         var_SetBool( p_input, "sub-autodetect-file", false );
     }
+
+    /* reset spu-delay on Init */
+    var_SetInteger(p_input, "spu-delay", 0);
 
     InitStatistics( p_input );
 #ifdef ENABLE_SOUT
@@ -3317,6 +3330,8 @@ static int input_SlaveSourceAdd( input_thread_t *p_input,
         return VLC_EGENERIC;
     }
 
+    if ( i_type == SLAVE_TYPE_SPU )
+        var_SetBool(p_input, "sub-isfilesub", true);
     if( i_type == SLAVE_TYPE_AUDIO )
     {
         if( b_set_time )
