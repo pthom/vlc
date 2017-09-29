@@ -630,16 +630,6 @@ static int PutAction( intf_thread_t *p_intf, input_thread_t *p_input,
             break;
         case ACTIONID_SUBSYNC_APPLY:
         {
-            /* Warning! Can yield a pause in the playback.
-             * For example, the following succession of actions will yield a 5 second delay :
-             * - Pressing Shift-H (ACTIONID_SUBSYNC_MARKAUDIO)
-             * - wait 5 second
-             * - Press Shift-J (ACTIONID_SUBSYNC_MARKSUB)
-             * - Press Shift-K (ACTIONID_SUBSYNC_APPLY)
-             * --> 5 seconds pause
-             * This is due to var_SetTime() (and ultimately UpdatePtsDelay())
-             * which causes the video to pause for an equivalent duration
-             * (This problem is also present in the "Track synchronization" window) */
             if ( p_input )
             {
                 if ( (p_sys->subtitle_delaybookmarks.i_time_audio == 0) || (p_sys->subtitle_delaybookmarks.i_time_subtitle == 0) )
